@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Radio Studio</title>
+    <style>
+        @font-face {
+            font-family: 'WRC Clean';
+            src: url('WRCCleanRoman.ttf') format('truetype');
+            font-weight: normal;
+        }
+        @font-face {
+            font-family: 'WRC Clean';
+            src: url('WRCCleanBold.ttf') format('truetype');
+            font-weight: bold;
+        }
+
+        :root {
+            --bg-color: #121212;
+            --panel-bg: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.1);
+            --accent: #00ffcc;
+            --text-main: #ffffff;
+            --text-sub: #aaaaaa;
+        }
+
+        body {
+            font-family: 'WRC Clean', sans-serif;
+            font-weight: normal;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1, h2, h3, .bold-text {
+            font-family: 'WRC Clean', sans-serif;
+            font-weight: bold;
+            margin-top: 0;
+        }
+
+        h1 {
+            color: var(--accent);
+            text-shadow: 0 0 10px rgba(0, 255, 204, 0.3);
+        }
+
+        .studio-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            width: 100%;
+            max-width: 1000px;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        canvas {
+            width: 100%;
+            height: 80px;
+            background: #000;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .control-group {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-size: 0.9em;
+            color: var(--text-sub);
+            margin-bottom: 5px;
+        }
+
+        select, input[type="file"], input[type="range"] {
+            background: rgba(0,0,0,0.5);
+            color: white;
+            border: 1px solid var(--border);
+            padding: 8px;
+            border-radius: 4px;
+            font-family: 'WRC Clean', sans-serif;
+        }
+
+        input[type="range"] {
+            accent-color: var(--accent);
+        }
+
+        .master-controls {
+            margin-top: 30px;
+            display: flex;
+            gap: 15px;
+            width: 100%;
+            max-width: 1000px;
+            justify-content: center;
+        }
+
+        button {
+            font-family: 'WRC Clean', sans-serif;
+            font-weight: bold;
+            background: var(--panel-bg);
+            color: white;
+            border: 1px solid var(--accent);
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 1.1em;
+        }
+
+        button:hover {
+            background: var(--accent);
+            color: #000;
+            box-shadow: 0 0 15px var(--accent);
+        }
+
+        button:disabled {
+            border-color: var(--text-sub);
+            color: var(--text-sub);
+            cursor: not-allowed;
+            background: transparent;
+            box-shadow: none;
+        }
+
+        .recording-indicator {
+            color: #ff3366;
+            font-weight: bold;
+            display: none;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+
+        .downloads {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+            max-width: 1000px;
+        }
+
+        .downloads a {
+            color: var(--accent);
+            text-decoration: none;
+            background: var(--panel-bg);
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+
+    <h1>RADIO STUDIO MASTER</h1>
+    <span id="recordingStatus" class="recording-indicator">● REC</span>
+
+    <div class="studio-container">
+        <div class="panel">
+            <h2>MIC 1</h2>
+            <canvas id="canvasMic1"></canvas>
+            <div class="control-group">
+                <label for="mic1Select">Device Select</label>
+                <select id="mic1Select"></select>
+            </div>
+            <div class="control-group">
+                <label for="mic1Vol">Volume</label>
+                <input type="range" id="mic1Vol" min="0" max="2" step="0.01" value="1">
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>MIC 2</h2>
+            <canvas id="canvasMic2"></canvas>
+            <div class="control-group">
+                <label for="mic2Select">Device Select</label>
+                <select id="mic2Select"></select>
+            </div>
+            <div class="control-group">
+                <label for="mic2Vol">Volume</label>
+                <input type="range" id="mic2Vol" min="0" max="2" step="0.01" value="1">
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>BGM DECK</h2>
+            <canvas id="canvasBgm"></canvas>
+            <div class="control-group">
+                <label for="bgmUpload">Upload Track (MP3/WAV)</label>
+                <input type="file" id="bgmUpload" accept="audio/*">
+            </div>
+            <div class="control-group">
+                <label for="bgmVol">Volume</label>
+                <input type="range" id="bgmVol" min="0" max="1" step="0.01" value="0.3">
+            </div>
+            <audio id="bgmAudio" loop></audio>
+        </div>
+    </div>
+
+    <div class="master-controls">
+        <button id="btnStart">START INIT</button>
+        <button id="btnRecord" disabled>● RECORD</button>
+        <button id="btnStop" disabled>■ STOP</button>
+    </div>
+
+    <div id="downloadLinks" class="downloads"></div>
+
+<script>
+    // System Variables
+    let audioCtx;
+    let mixedDest;
+    let recorders = {};
+    let recordedChunks = { mix: [], mic1: [], mic2: [] };
+    let streamMic1, streamMic2;
+    
+    // Nodes
+    let gainMic1, gainMic2, gainBgm;
+    let analyserMic1, analyserMic2, analyserBgm;
+
+    // Elements
+    const mic1Select = document.getElementById('mic1Select');
+    const mic2Select = document.getElementById('mic2Select');
+    const bgmAudio = document.getElementById('bgmAudio');
+    const bgmUpload = document.getElementById('bgmUpload');
+    const downloadLinks = document.getElementById('downloadLinks');
+    
+    // IndexedDB Setup for BGM
+    const dbName = "RadioStudioDB";
+    let db;
+    const request = indexedDB.open(dbName, 1);
+    
+    request.onupgradeneeded = (e) => {
+        db = e.target.result;
+        db.createObjectStore("files", { keyPath: "id" });
+    };
+    
+    request.onsuccess = (e) => {
+        db = e.target.result;
+        loadBgmFromDB();
+    };
+
+    // Load devices
+    async function getDevices() {
+        try {
+            await navigator.mediaDevices.getUserMedia({ audio: true }); // Request permission first
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioInputs = devices.filter(d => d.kind === 'audioinput');
+            
+            [mic1Select, mic2Select].forEach(select => {
+                select.innerHTML = '<option value="">None</option>';
+                audioInputs.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.text = device.label || `Microphone ${select.options.length}`;
+                    select.appendChild(option);
+                });
+            });
+        } catch (err) {
+            console.error("Mic access denied or error:", err);
+            alert("マイクへのアクセスを許可してください。");
+        }
+    }
+
+    // Initialize Audio Context and Routing
+    async function initAudio() {
+        if(!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            mixedDest = audioCtx.createMediaStreamDestination();
+            
+            // Create Gains
+            gainMic1 = audioCtx.createGain();
+            gainMic2 = audioCtx.createGain();
+            gainBgm = audioCtx.createGain();
+            
+            // Create Analysers
+            analyserMic1 = audioCtx.createAnalyser();
+            analyserMic2 = audioCtx.createAnalyser();
+            analyserBgm = audioCtx.createAnalyser();
+
+            // Connect Gains to Master Mix AND normal destination (so you can hear it)
+            gainMic1.connect(mixedDest);
+            gainMic2.connect(mixedDest);
+            gainBgm.connect(mixedDest);
+            gainBgm.connect(audioCtx.destination); // Hear BGM in speakers
+            
+            // Connect to Analysers
+            gainMic1.connect(analyserMic1);
+            gainMic2.connect(analyserMic2);
+            gainBgm.connect(analyserBgm);
+
+            // Setup BGM Source
+            const bgmSource = audioCtx.createMediaElementSource(bgmAudio);
+            bgmSource.connect(gainBgm);
+
+            // Load saved volumes
+            document.getElementById('mic1Vol').value = localStorage.getItem('mic1Vol') || 1;
+            document.getElementById('mic2Vol').value = localStorage.getItem('mic2Vol') || 1;
+            document.getElementById('bgmVol').value = localStorage.getItem('bgmVol') || 0.3;
+            
+            updateVolumes();
+            drawWaveform('canvasMic1', analyserMic1);
+            drawWaveform('canvasMic2', analyserMic2);
+            drawWaveform('canvasBgm', analyserBgm);
+        }
+
+        // Setup Mic 1
+        if (mic1Select.value) {
+            if (streamMic1) streamMic1.getTracks().forEach(t => t.stop());
+            streamMic1 = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: mic1Select.value } } });
+            const source1 = audioCtx.createMediaStreamSource(streamMic1);
+            source1.connect(gainMic1);
+            setupRecorder('mic1', streamMic1);
+        }
+
+        // Setup Mic 2
+        if (mic2Select.value && mic2Select.value !== mic1Select.value) {
+            if (streamMic2) streamMic2.getTracks().forEach(t => t.stop());
+            streamMic2 = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: mic2Select.value } } });
+            const source2 = audioCtx.createMediaStreamSource(streamMic2);
+            source2.connect(gainMic2);
+            setupRecorder('mic2', streamMic2);
+        }
+
+        setupRecorder('mix', mixedDest.stream);
+
+        document.getElementById('btnStart').disabled = true;
+        document.getElementById('btnRecord').disabled = false;
+    }
+
+    function setupRecorder(id, stream) {
+        recordedChunks[id] = [];
+        recorders[id] = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        recorders[id].ondataavailable = e => {
+            if (e.data.size > 0) recordedChunks[id].push(e.data);
+        };
+        recorders[id].onstop = () => {
+            const blob = new Blob(recordedChunks[id], { type: 'audio/webm' });
+            createDownloadLink(blob, `Radio_${id}_${new Date().getTime()}.webm`);
+        };
+    }
+
+    function createDownloadLink(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.textContent = `💾 Download ${filename}`;
+        downloadLinks.appendChild(a);
+    }
+
+    // Volume Control & Storage
+    function updateVolumes() {
+        if(gainMic1) gainMic1.gain.value = document.getElementById('mic1Vol').value;
+        if(gainMic2) gainMic2.gain.value = document.getElementById('mic2Vol').value;
+        if(gainBgm) gainBgm.gain.value = document.getElementById('bgmVol').value;
+
+        localStorage.setItem('mic1Vol', document.getElementById('mic1Vol').value);
+        localStorage.setItem('mic2Vol', document.getElementById('mic2Vol').value);
+        localStorage.setItem('bgmVol', document.getElementById('bgmVol').value);
+    }
+
+    ['mic1Vol', 'mic2Vol', 'bgmVol'].forEach(id => {
+        document.getElementById(id).addEventListener('input', updateVolumes);
+    });
+
+    // Handle BGM Upload & IndexedDB
+    bgmUpload.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const arrayBuffer = event.target.result;
+                const blob = new Blob([arrayBuffer], { type: file.type });
+                
+                // Save to DB
+                const tx = db.transaction("files", "readwrite");
+                tx.objectStore("files").put({ id: "bgm", blob: blob });
+                
+                loadBgmBlob(blob);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+    });
+
+    function loadBgmFromDB() {
+        const tx = db.transaction("files", "readonly");
+        const req = tx.objectStore("files").get("bgm");
+        req.onsuccess = (e) => {
+            if (e.target.result) loadBgmBlob(e.target.result.blob);
+        };
+    }
+
+    function loadBgmBlob(blob) {
+        const url = URL.createObjectURL(blob);
+        bgmAudio.src = url;
+    }
+
+    // Recording Controls
+    document.getElementById('btnStart').addEventListener('click', initAudio);
+    
+    document.getElementById('btnRecord').addEventListener('click', () => {
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+        bgmAudio.play();
+        
+        Object.values(recorders).forEach(r => r.start());
+        document.getElementById('btnRecord').disabled = true;
+        document.getElementById('btnStop').disabled = false;
+        document.getElementById('recordingStatus').style.display = 'block';
+        downloadLinks.innerHTML = ''; // Clear old links
+    });
+
+    document.getElementById('btnStop').addEventListener('click', () => {
+        bgmAudio.pause();
+        bgmAudio.currentTime = 0;
+        
+        Object.values(recorders).forEach(r => {
+            if(r.state !== 'inactive') r.stop();
+        });
+        
+        document.getElementById('btnRecord').disabled = false;
+        document.getElementById('btnStop').disabled = true;
+        document.getElementById('recordingStatus').style.display = 'none';
+    });
+
+    // Waveform Visualization
+    function drawWaveform(canvasId, analyser) {
+        const canvas = document.getElementById(canvasId);
+        const ctx = canvas.getContext('2d');
+        analyser.fftSize = 2048;
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        function draw() {
+            requestAnimationFrame(draw);
+            analyser.getByteTimeDomainData(dataArray);
+
+            ctx.fillStyle = 'rgb(0, 0, 0)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgb(0, 255, 204)';
+            ctx.beginPath();
+
+            const sliceWidth = canvas.width * 1.0 / bufferLength;
+            let x = 0;
+
+            for (let i = 0; i < bufferLength; i++) {
+                const v = dataArray[i] / 128.0;
+                const y = v * canvas.height / 2;
+
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+
+                x += sliceWidth;
+            }
+            ctx.lineTo(canvas.width, canvas.height / 2);
+            ctx.stroke();
+        }
+        draw();
+    }
+
+    // Initial setup
+    getDevices();
+    navigator.mediaDevices.addEventListener('devicechange', getDevices);
+</script>
+</body>
+</html>
