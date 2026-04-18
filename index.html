@@ -305,19 +305,25 @@
     const showMsg = (msg) => { sysMsg.innerText = msg; console.log(msg); };
 
     // ==========================================
-    // System Initialization (エラーでも突破する)
+    // System Initialization (エラーでも必ず突破する)
     // ==========================================
     async function powerOn() {
         let dummyStream = null;
         try {
-            // マイク権限を要求。失敗してもcatchで拾って処理を続行。
-            dummyStream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(err => {
-                console.warn("マイクアクセス不可。強制起動します。", err);
+            // 1. マイク権限要求 (HTTPS環境でない等で navigator.mediaDevices 自体がない場合も考慮)
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                dummyStream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(err => {
+                    console.warn("マイクへのアクセスが拒否されたか、デバイスがありません。", err);
+                    document.getElementById('powerErrorMsg').style.display = 'block';
+                    return null;
+                });
+            } else {
+                console.warn("お使いの環境ではマイク機能がサポートされていません。");
+                document.getElementById('powerErrorMsg').innerText = "マイク機能がサポートされていませんが、UIを強制起動します。";
                 document.getElementById('powerErrorMsg').style.display = 'block';
-                return null;
-            });
+            }
             
-            // AudioContextの初期化
+            // 2. AudioContext 初期化
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             mixedDest = audioCtx.createMediaStreamDestination();
             
@@ -335,18 +341,23 @@
                 bgmState.gain.gain.value = e.target.value;
             });
 
-            // Master Recorder Setup
-            masterRecorder = new MediaRecorder(mixedDest.stream, { mimeType: 'audio/webm' });
-            masterRecorder.ondataavailable = e => { if(e.data.size > 0) recordedChunks.master.push(e.data); };
-            masterRecorder.onstop = () => convertAndDownload(recordedChunks.master, 'Master_Mix');
+            // Master Recorder Setup (ブラウザによって MediaRecorder がエラーを吐く場合を回避)
+            try {
+                masterRecorder = new MediaRecorder(mixedDest.stream, { mimeType: 'audio/webm' });
+                masterRecorder.ondataavailable = e => { if(e.data.size > 0) recordedChunks.master.push(e.data); };
+                masterRecorder.onstop = () => convertAndDownload(recordedChunks.master, 'Master_Mix');
+            } catch(e) {
+                console.warn("MediaRecorderのエラー:", e);
+                showMsg("警告: 録音機能が一部サポートされていないブラウザです。");
+            }
 
             await updateDeviceList();
             
-            // 少し待ってからUIを切り替え（ユーザーにエラーメッセージを読ませるため）
+            // 3. UIの切り替え
             setTimeout(() => {
                 document.getElementById('powerOverlay').style.display = 'none';
                 document.getElementById('btnRecord').disabled = false;
-                addMicPanel(); // 初期マイクを1つ追加
+                addMicPanel(); 
                 
                 if(dummyStream) dummyStream.getTracks().forEach(t => t.stop());
                 showMsg("System Online. Ready.");
@@ -354,7 +365,16 @@
 
         } catch (e) {
             console.error("Critical System Error:", e);
-            alert("システムを起動できませんでした。リロードしてください。");
+            // 【重要】どんなエラーが起きても強制的にUIを開く
+            document.getElementById('powerOverlay').style.display = 'none';
+            document.getElementById('btnRecord').disabled = false;
+            
+            // AudioContextが未定義のままパネルを追加するとエラーになるため、可能なら再初期化
+            if(!audioCtx) {
+                try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(err){}
+            }
+            addMicPanel();
+            showMsg("一部のシステムにエラーが発生しましたが、画面を強制的に開きました。");
         }
     }
 
@@ -363,31 +383,37 @@
     // ==========================================
     async function updateDeviceList() {
         try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            cachedDevices = devices.filter(d => d.kind === 'audioinput');
+            if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                cachedDevices = devices.filter(d => d.kind === 'audioinput');
+            }
         } catch(e) {
             cachedDevices = [];
         }
         Object.keys(micState).forEach(micId => populateMicSelect(micId));
     }
 
-    navigator.mediaDevices.addEventListener('devicechange', updateDeviceList);
+    if (navigator.mediaDevices) {
+        navigator.mediaDevices.addEventListener('devicechange', updateDeviceList);
+    }
 
     function addMicPanel() {
         micCounter++;
         const micId = `mic_${Date.now()}`;
         
         micState[micId] = {
-            gain: audioCtx.createGain(),
-            analyser: audioCtx.createAnalyser(),
+            gain: audioCtx ? audioCtx.createGain() : null,
+            analyser: audioCtx ? audioCtx.createAnalyser() : null,
             stream: null,
             recorder: null,
             peerConn: null,
             recordedChunks: []
         };
         
-        micState[micId].gain.connect(micState[micId].analyser);
-        micState[micId].analyser.connect(mixedDest);
+        if (audioCtx && mixedDest) {
+            micState[micId].gain.connect(micState[micId].analyser);
+            micState[micId].analyser.connect(mixedDest);
+        }
 
         const container = document.createElement('div');
         container.className = 'panel';
@@ -412,7 +438,9 @@
         
         document.getElementById('micsContainer').appendChild(container);
         populateMicSelect(micId);
-        drawWaveform(`canvas_${micId}`, micState[micId].analyser, '#00e6b8');
+        if(micState[micId].analyser) {
+            drawWaveform(`canvas_${micId}`, micState[micId].analyser, '#00e6b8');
+        }
     }
 
     function populateMicSelect(micId) {
@@ -424,7 +452,6 @@
         cachedDevices.forEach((device, index) => {
             const opt = document.createElement('option');
             opt.value = device.deviceId;
-            // 権限がないとラベルが空になるためフォールバック
             opt.text = device.label || `Hardware Mic ${index + 1}`;
             select.appendChild(opt);
         });
@@ -450,7 +477,7 @@
             state.peerConn = null;
         }
 
-        if(deviceId && deviceId !== 'remote') {
+        if(deviceId && deviceId !== 'remote' && audioCtx) {
             try {
                 state.stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
                 const source = audioCtx.createMediaStreamSource(state.stream);
@@ -464,7 +491,7 @@
     }
 
     function changeMicVol(micId, val) {
-        if(micState[micId]) micState[micId].gain.gain.value = val;
+        if(micState[micId] && micState[micId].gain) micState[micId].gain.gain.value = val;
     }
 
     function removeMic(micId) {
@@ -550,13 +577,15 @@
                         state.stream = remoteStream;
                         state.peerConn = call;
                         
-                        state.gain.disconnect();
-                        state.gain = audioCtx.createGain();
-                        state.gain.connect(state.analyser);
-                        state.gain.gain.value = document.getElementById(`vol_${targetMicId}`).value;
-                        
-                        const source = audioCtx.createMediaStreamSource(state.stream);
-                        source.connect(state.gain);
+                        if (audioCtx) {
+                            state.gain.disconnect();
+                            state.gain = audioCtx.createGain();
+                            state.gain.connect(state.analyser);
+                            state.gain.gain.value = document.getElementById(`vol_${targetMicId}`).value;
+                            
+                            const source = audioCtx.createMediaStreamSource(state.stream);
+                            source.connect(state.gain);
+                        }
                         
                         populateMicSelect(targetMicId); 
                     }
@@ -600,22 +629,26 @@
     }
 
     document.getElementById('btnRecord').addEventListener('click', () => {
-        if(audioCtx.state === 'suspended') audioCtx.resume();
+        if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
         if(document.getElementById('bgmSelect').value) document.getElementById('bgmAudio').play();
         
         Object.keys(micState).forEach(id => {
             if(micState[id].stream) {
-                micState[id].recordedChunks = [];
-                micState[id].recorder = new MediaRecorder(micState[id].stream, { mimeType: 'audio/webm' });
-                micState[id].recorder.ondataavailable = e => { if (e.data.size > 0) micState[id].recordedChunks.push(e.data); };
-                const name = document.getElementById(`name_${id}`).value;
-                micState[id].recorder.onstop = () => convertAndDownload(micState[id].recordedChunks, name);
-                micState[id].recorder.start();
+                try {
+                    micState[id].recordedChunks = [];
+                    micState[id].recorder = new MediaRecorder(micState[id].stream, { mimeType: 'audio/webm' });
+                    micState[id].recorder.ondataavailable = e => { if (e.data.size > 0) micState[id].recordedChunks.push(e.data); };
+                    const name = document.getElementById(`name_${id}`).value;
+                    micState[id].recorder.onstop = () => convertAndDownload(micState[id].recordedChunks, name);
+                    micState[id].recorder.start();
+                } catch(err) { console.warn("Mic Record error:", err); }
             }
         });
         
-        recordedChunks.master = [];
-        masterRecorder.start();
+        if (masterRecorder) {
+            recordedChunks.master = [];
+            masterRecorder.start();
+        }
         
         document.getElementById('btnRecord').disabled = true;
         document.getElementById('btnStop').disabled = false;
@@ -631,7 +664,7 @@
         audio.pause();
         audio.currentTime = 0; 
         
-        masterRecorder.stop();
+        if(masterRecorder && masterRecorder.state !== 'inactive') masterRecorder.stop();
         Object.values(micState).forEach(state => {
             if(state.recorder && state.recorder.state !== 'inactive') state.recorder.stop();
         });
@@ -646,6 +679,7 @@
 
     // MP3 Encoding (High Quality: 320kbps)
     async function convertAndDownload(chunks, filenameRaw) {
+        if (chunks.length === 0) return;
         const safeName = filenameRaw.replace(/[^a-z0-9]/gi, '_');
         const webmBlob = new Blob(chunks, { type: 'audio/webm' });
         
@@ -654,7 +688,6 @@
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
             const channels = audioBuffer.numberOfChannels;
             
-            // ★ 高音質化: 320 kbps に設定 ★
             const mp3encoder = new lamejs.Mp3Encoder(channels, audioBuffer.sampleRate, 320);
             const mp3Data = [];
             
@@ -749,7 +782,7 @@
 
     function drawWaveform(canvasId, analyser, color) {
         const canvas = document.getElementById(canvasId);
-        if(!canvas) return;
+        if(!canvas || !analyser) return;
         const ctx = canvas.getContext('2d');
         analyser.fftSize = 2048;
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
