@@ -47,7 +47,6 @@
             margin-top: 0;
         }
 
-        /* --- Header & Status --- */
         .header-bar {
             text-align: center;
             margin-bottom: 20px;
@@ -104,7 +103,6 @@
             50% { opacity: 0.3; text-shadow: none; }
         }
 
-        /* --- Studio UI --- */
         .studio-container {
             display: grid;
             grid-template-columns: 1fr;
@@ -129,7 +127,6 @@
             position: relative;
         }
 
-        /* 編集可能なマイク名 */
         .mic-name-input {
             background: transparent;
             border: none;
@@ -175,7 +172,6 @@
             padding: 6px 12px;
         }
 
-        /* --- Global Controls --- */
         .master-controls {
             display: flex;
             gap: 15px;
@@ -207,7 +203,6 @@
         #btnRecord:hover:not(:disabled) { box-shadow: 0 0 15px rgba(255, 71, 126, 0.4); background: rgba(255,71,126,0.1); }
         button:disabled { opacity: 0.4; cursor: not-allowed; }
 
-        /* --- Downloads --- */
         .downloads { width: 100%; max-width: 1200px; display: flex; flex-direction: column; gap: 10px; }
         .download-item {
             display: flex; justify-content: space-between; align-items: center;
@@ -216,7 +211,6 @@
         .download-item a { color: var(--accent); text-decoration: none; }
         #sysMessage { color: var(--accent); font-size: 0.9em; margin-bottom: 10px; text-align: center; height: 20px;}
 
-        /* --- Remote Mode UI --- */
         #remoteModeUI {
             display: none; flex-direction: column; align-items: center; justify-content: center; height: 60vh; text-align: center;
         }
@@ -224,7 +218,6 @@
             font-size: 6rem; color: var(--accent); letter-spacing: 15px; text-shadow: 0 0 25px rgba(0,230,184,0.5); margin: 20px 0;
         }
         
-        /* Power On Overlay */
         #powerOverlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.9); display: flex; flex-direction: column;
@@ -239,6 +232,7 @@
         <h1 style="font-size: 3em; margin-bottom: 30px;">RADIO STUDIO</h1>
         <button onclick="powerOn()">POWER ON SYSTEM</button>
         <p style="color: var(--text-sub); margin-top: 20px;">※ブラウザのマイク許可を求めてきます</p>
+        <p id="powerErrorMsg" style="color: var(--danger); margin-top: 10px; display:none;">マイクが認識されませんでしたが、システムを強制起動します。</p>
     </div>
 
     <div class="header-bar">
@@ -255,7 +249,7 @@
     <div id="studioUI">
         <div class="master-controls" id="studioControls">
             <button id="btnAddMic" onclick="addMicPanel()">➕ ADD MIC</button>
-            <button id="btnRecord" disabled>● RECORD</button>
+            <button id="btnRecord" disabled>● RECORD (320kbps)</button>
             <button id="btnStop" disabled>■ STOP</button>
         </div>
 
@@ -273,7 +267,7 @@
                     </div>
                     <div class="control-group">
                         <label>Upload New BGM (Multiple OK)</label>
-                        <input type="file" id="bgmUpload" accept="audio/*" multiple>
+                        <input type="file" id="bgmUpload" accept="audio/mpeg, audio/mp3, audio/wav, .mp3, .wav, .m4a, audio/*" multiple>
                     </div>
                     <div class="control-group">
                         <label>Volume</label>
@@ -295,11 +289,8 @@
     <div id="downloadLinks" class="downloads"></div>
 
 <script>
-    // ==========================================
-    // Core Audio & State Variables
-    // ==========================================
     let audioCtx, mixedDest;
-    let micState = {}; // { micId: { stream, gain, analyser, recorder, peerConn } }
+    let micState = {}; 
     let bgmState = { gain: null, analyser: null, recorder: null };
     let masterRecorder;
     let recordedChunks = { master: [] };
@@ -314,13 +305,19 @@
     const showMsg = (msg) => { sysMsg.innerText = msg; console.log(msg); };
 
     // ==========================================
-    // System Initialization
+    // System Initialization (エラーでも突破する)
     // ==========================================
     async function powerOn() {
+        let dummyStream = null;
         try {
-            // マイク権限をここで一括要求。システム起動。
-            const dummyStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // マイク権限を要求。失敗してもcatchで拾って処理を続行。
+            dummyStream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(err => {
+                console.warn("マイクアクセス不可。強制起動します。", err);
+                document.getElementById('powerErrorMsg').style.display = 'block';
+                return null;
+            });
             
+            // AudioContextの初期化
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             mixedDest = audioCtx.createMediaStreamDestination();
             
@@ -329,7 +326,7 @@
             bgmState.analyser = audioCtx.createAnalyser();
             bgmState.gain.connect(bgmState.analyser);
             bgmState.analyser.connect(mixedDest);
-            bgmState.analyser.connect(audioCtx.destination); // スピーカーにも流す
+            bgmState.analyser.connect(audioCtx.destination); 
             
             const bgmSource = audioCtx.createMediaElementSource(document.getElementById('bgmAudio'));
             bgmSource.connect(bgmState.gain);
@@ -343,24 +340,21 @@
             masterRecorder.ondataavailable = e => { if(e.data.size > 0) recordedChunks.master.push(e.data); };
             masterRecorder.onstop = () => convertAndDownload(recordedChunks.master, 'Master_Mix');
 
-            // Fetch Devices
             await updateDeviceList();
             
-            // UI表示の切り替え
-            document.getElementById('powerOverlay').style.display = 'none';
-            document.getElementById('btnRecord').disabled = false;
-            
-            // 初期マイクを1つ追加
-            addMicPanel();
-            
-            // ダミーストリームを停止
-            dummyStream.getTracks().forEach(t => t.stop());
-            
-            showMsg("System Online. All systems ready.");
-            
+            // 少し待ってからUIを切り替え（ユーザーにエラーメッセージを読ませるため）
+            setTimeout(() => {
+                document.getElementById('powerOverlay').style.display = 'none';
+                document.getElementById('btnRecord').disabled = false;
+                addMicPanel(); // 初期マイクを1つ追加
+                
+                if(dummyStream) dummyStream.getTracks().forEach(t => t.stop());
+                showMsg("System Online. Ready.");
+            }, dummyStream ? 100 : 1500);
+
         } catch (e) {
-            alert("エラー: マイクへのアクセスが許可されていません。設定を確認してください。");
-            console.error(e);
+            console.error("Critical System Error:", e);
+            alert("システムを起動できませんでした。リロードしてください。");
         }
     }
 
@@ -368,9 +362,12 @@
     // Dynamic Mic Management
     // ==========================================
     async function updateDeviceList() {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        cachedDevices = devices.filter(d => d.kind === 'audioinput');
-        // 既存のセレクトボックスも更新
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            cachedDevices = devices.filter(d => d.kind === 'audioinput');
+        } catch(e) {
+            cachedDevices = [];
+        }
         Object.keys(micState).forEach(micId => populateMicSelect(micId));
     }
 
@@ -380,7 +377,6 @@
         micCounter++;
         const micId = `mic_${Date.now()}`;
         
-        // State Initialization
         micState[micId] = {
             gain: audioCtx.createGain(),
             analyser: audioCtx.createAnalyser(),
@@ -390,11 +386,9 @@
             recordedChunks: []
         };
         
-        // Routing
         micState[micId].gain.connect(micState[micId].analyser);
         micState[micId].analyser.connect(mixedDest);
 
-        // DOM Creation
         const container = document.createElement('div');
         container.className = 'panel';
         container.id = `panel_${micId}`;
@@ -430,11 +424,11 @@
         cachedDevices.forEach((device, index) => {
             const opt = document.createElement('option');
             opt.value = device.deviceId;
+            // 権限がないとラベルが空になるためフォールバック
             opt.text = device.label || `Hardware Mic ${index + 1}`;
             select.appendChild(opt);
         });
         
-        // もしリモート接続中ならリモートの選択肢を追加
         if(micState[micId].peerConn) {
             const opt = document.createElement('option');
             opt.value = 'remote';
@@ -450,7 +444,6 @@
         const state = micState[micId];
         const deviceId = document.getElementById(`select_${micId}`).value;
         
-        // 既存のストリームとP2P接続をクリーンアップ
         if(state.stream) state.stream.getTracks().forEach(t => t.stop());
         if(state.peerConn && deviceId !== 'remote') {
             state.peerConn.close();
@@ -464,8 +457,8 @@
                 source.connect(state.gain);
                 showMsg(`Mic applied to ${document.getElementById('name_'+micId).value}`);
             } catch (e) {
-                console.error("Failed to apply mic:", e);
-                showMsg("マイクの切り替えに失敗しました");
+                console.warn("Failed to apply mic:", e);
+                showMsg("マイクの適用に失敗しました。デバイスがロックされている可能性があります。");
             }
         }
     }
@@ -518,14 +511,12 @@
             document.getElementById('remoteSysMsg').innerText = "Waiting for Host connection...";
         });
 
-        // ハンドシェイク受信
         peer.on('connection', conn => {
             conn.on('data', async (data) => {
                 if(data.action === 'handshake') {
                     document.getElementById('remoteSysMsg').innerText = "Handshake received. Accessing Mic...";
                     try {
                         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                        // メタデータとして対象のマイクIDを付与してコールバック
                         peer.call(data.hostId, stream, { metadata: { targetMicId: data.targetMicId } });
                         
                         document.getElementById('remoteSysMsg').innerText = "🔴 Streaming Audio to Studio!";
@@ -546,10 +537,9 @@
             peer = new Peer();
             peer.on('open', onReady);
             
-            // リモートからの着信
             peer.on('call', call => {
-                call.answer(); // 自動応答
-                const targetMicId = call.metadata.targetMicId; // ハンドシェイク時に仕込んだIDを取得
+                call.answer(); 
+                const targetMicId = call.metadata.targetMicId; 
                 
                 call.on('stream', remoteStream => {
                     if(micState[targetMicId]) {
@@ -560,7 +550,6 @@
                         state.stream = remoteStream;
                         state.peerConn = call;
                         
-                        // 再接続処理
                         state.gain.disconnect();
                         state.gain = audioCtx.createGain();
                         state.gain.connect(state.analyser);
@@ -569,7 +558,7 @@
                         const source = audioCtx.createMediaStreamSource(state.stream);
                         source.connect(state.gain);
                         
-                        populateMicSelect(targetMicId); // セレクトボックスの表示更新
+                        populateMicSelect(targetMicId); 
                     }
                 });
             });
@@ -585,7 +574,6 @@
         showMsg("Connecting to remote device...");
 
         getHostPeer(() => {
-            // ハンドシェイク送信: 自分のPeerIDと、繋げたいマイクのパネルIDを送信
             const conn = peer.connect('radio-mic-' + pin);
             conn.on('open', () => {
                 conn.send({ action: 'handshake', hostId: peer.id, targetMicId: micId });
@@ -598,7 +586,7 @@
     }
 
     // ==========================================
-    // Recording & BGM Management
+    // Recording
     // ==========================================
     function startTimer() {
         startTime = Date.now();
@@ -615,7 +603,6 @@
         if(audioCtx.state === 'suspended') audioCtx.resume();
         if(document.getElementById('bgmSelect').value) document.getElementById('bgmAudio').play();
         
-        // 全マイクのレコーダーを初期化・開始
         Object.keys(micState).forEach(id => {
             if(micState[id].stream) {
                 micState[id].recordedChunks = [];
@@ -654,10 +641,10 @@
         document.getElementById('recordingStatus').style.display = 'none';
         
         clearInterval(timerInterval);
-        showMsg("Recording stopped. Processing files...");
+        showMsg("Recording stopped. Encoding MP3 (320kbps)...");
     });
 
-    // MP3 Encoding via lamejs
+    // MP3 Encoding (High Quality: 320kbps)
     async function convertAndDownload(chunks, filenameRaw) {
         const safeName = filenameRaw.replace(/[^a-z0-9]/gi, '_');
         const webmBlob = new Blob(chunks, { type: 'audio/webm' });
@@ -666,7 +653,9 @@
             const arrayBuffer = await webmBlob.arrayBuffer();
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
             const channels = audioBuffer.numberOfChannels;
-            const mp3encoder = new lamejs.Mp3Encoder(channels, audioBuffer.sampleRate, 128);
+            
+            // ★ 高音質化: 320 kbps に設定 ★
+            const mp3encoder = new lamejs.Mp3Encoder(channels, audioBuffer.sampleRate, 320);
             const mp3Data = [];
             
             const left = audioBuffer.getChannelData(0);
@@ -689,7 +678,7 @@
             
             createDownloadLink(new Blob(mp3Data, { type: 'audio/mp3' }), `${safeName}_${Date.now()}.mp3`);
         } catch(e) {
-            console.error(e);
+            console.error("MP3 Encode Error:", e);
             createDownloadLink(webmBlob, `${safeName}_fallback.webm`);
         }
     }
@@ -703,13 +692,12 @@
     }
 
     // --- BGM IndexedDB ---
-    const dbName = "RadioStudioDB_v3";
+    const dbName = "RadioStudioDB_v4";
     let db;
     const request = indexedDB.open(dbName, 1);
     request.onupgradeneeded = e => { db = e.target.result; db.createObjectStore("bgmFiles", { keyPath: "id", autoIncrement: true }); };
     request.onsuccess = e => { db = e.target.result; updateBgmList(); };
 
-    // 複数アップロード対応
     document.getElementById('bgmUpload').addEventListener('change', (e) => {
         const files = Array.from(e.target.files);
         if (files.length === 0) return;
@@ -759,7 +747,6 @@
         };
     });
 
-    // Waveform Drawer
     function drawWaveform(canvasId, analyser, color) {
         const canvas = document.getElementById(canvasId);
         if(!canvas) return;
@@ -768,7 +755,7 @@
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
         function draw() {
-            if(!document.getElementById(canvasId)) return; // Stop if removed
+            if(!document.getElementById(canvasId)) return; 
             requestAnimationFrame(draw);
             analyser.getByteTimeDomainData(dataArray);
             ctx.clearRect(0, 0, canvas.width, canvas.height);
