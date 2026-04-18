@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web Radio Studio</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         @font-face {
             font-family: 'WRC Clean';
@@ -49,6 +50,9 @@
         .header-bar {
             text-align: center;
             margin-bottom: 20px;
+            position: relative;
+            width: 100%;
+            max-width: 1100px;
         }
 
         h1 {
@@ -56,6 +60,16 @@
             letter-spacing: 2px;
             text-shadow: 0 0 15px rgba(0, 230, 184, 0.4);
             margin-bottom: 5px;
+        }
+
+        .btn-mode-switch {
+            position: absolute;
+            right: 0;
+            top: 0;
+            font-size: 0.9em;
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 6px;
         }
 
         .status-panel {
@@ -88,6 +102,7 @@
             50% { opacity: 0.3; text-shadow: none; }
         }
 
+        /* Studio Mode UI */
         .studio-container {
             display: grid;
             grid-template-columns: 1fr;
@@ -97,9 +112,7 @@
         }
 
         @media (min-width: 768px) {
-            .studio-container {
-                grid-template-columns: repeat(3, 1fr);
-            }
+            .studio-container { grid-template-columns: repeat(3, 1fr); }
         }
 
         .panel {
@@ -108,7 +121,6 @@
             border-radius: 16px;
             padding: 20px;
             backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
             display: flex;
             flex-direction: column;
@@ -134,7 +146,6 @@
             color: var(--text-sub);
             margin-bottom: 6px;
             text-transform: uppercase;
-            letter-spacing: 1px;
         }
 
         select, input[type="file"] {
@@ -147,18 +158,9 @@
             outline: none;
         }
 
-        select:focus {
-            border-color: var(--accent);
-        }
-
         input[type="range"] {
             accent-color: var(--accent);
             cursor: pointer;
-        }
-
-        .bgm-flex {
-            display: flex;
-            gap: 10px;
         }
 
         .master-controls {
@@ -174,33 +176,33 @@
             background: rgba(0,0,0,0.4);
             color: white;
             border: 1px solid var(--border);
-            padding: 14px 30px;
-            border-radius: 10px;
+            padding: 12px 24px;
+            border-radius: 8px;
             cursor: pointer;
             transition: all 0.2s ease;
-            font-size: 1.1em;
+            font-size: 1em;
             letter-spacing: 1px;
         }
 
         button:hover:not(:disabled) {
             background: rgba(255,255,255,0.1);
             border-color: var(--accent);
-            box-shadow: 0 0 20px rgba(0, 230, 184, 0.2);
+            box-shadow: 0 0 15px rgba(0, 230, 184, 0.2);
+        }
+
+        .btn-p2p {
+            border-color: #8b92a5;
+            margin-top: 5px;
+            font-size: 0.9em;
+            padding: 8px 16px;
         }
 
         #btnRecord {
             border-color: var(--danger);
             color: var(--danger);
         }
-        #btnRecord:hover:not(:disabled) {
-            background: rgba(255, 71, 126, 0.1);
-            box-shadow: 0 0 20px rgba(255, 71, 126, 0.3);
-        }
 
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .downloads {
             margin-top: 20px;
@@ -221,31 +223,41 @@
             border: 1px solid var(--border);
         }
 
-        .download-item a {
-            color: var(--accent);
-            text-decoration: none;
-            font-weight: bold;
-            font-family: 'WRC Clean', sans-serif;
-        }
+        .download-item a { color: var(--accent); text-decoration: none; font-weight: bold; }
+        #sysMessage { margin-top: 15px; color: var(--accent); font-size: 0.9em; }
 
-        #sysMessage {
-            margin-top: 15px;
+        /* Remote Mic UI */
+        #remoteModeUI {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 60vh;
+            text-align: center;
+        }
+        .pin-display {
+            font-size: 5rem;
+            font-weight: bold;
             color: var(--accent);
-            font-size: 0.9em;
+            letter-spacing: 10px;
+            text-shadow: 0 0 20px rgba(0,230,184,0.5);
+            margin: 20px 0;
+            font-family: 'WRC Clean', sans-serif;
         }
     </style>
 </head>
 <body>
 
     <div class="header-bar">
-        <h1>RADIO STUDIO MASTER</h1>
-        <div class="status-panel">
+        <h1>RADIO STUDIO</h1>
+        <button class="btn-mode-switch" onclick="toggleMode()" id="modeBtn">📱 リモートマイクにする</button>
+        <div class="status-panel" id="studioStatus">
             <span id="recordingStatus" class="recording-indicator">● REC</span>
             <div id="timerDisplay" class="timer">00:00</div>
         </div>
     </div>
 
-    <div class="studio-container">
+    <div class="studio-container" id="studioUI">
         <div class="panel">
             <h2>MIC 1</h2>
             <canvas id="canvasMic1"></canvas>
@@ -260,11 +272,12 @@
         </div>
 
         <div class="panel">
-            <h2>MIC 2</h2>
+            <h2>MIC 2 / REMOTE</h2>
             <canvas id="canvasMic2"></canvas>
             <div class="control-group">
                 <label>Device Select</label>
                 <select id="mic2Select"></select>
+                <button class="btn-p2p" onclick="connectRemoteMic()">📡 別デバイスをマイクとして使う</button>
             </div>
             <div class="control-group">
                 <label>Volume</label>
@@ -275,17 +288,13 @@
         <div class="panel">
             <h2>BGM DECK</h2>
             <canvas id="canvasBgm"></canvas>
-            
             <div class="control-group">
                 <label>Track List</label>
-                <select id="bgmSelect">
-                    <option value="">No Track</option>
-                </select>
+                <select id="bgmSelect"><option value="">No Track</option></select>
             </div>
-
             <div class="control-group">
-                <label>Upload New BGM (MP3/WAV)</label>
-                <input type="file" id="bgmUpload" accept="audio/*">
+                <label>Upload New BGM</label>
+                <input type="file" id="bgmUpload" accept=".mp3, .wav, audio/mpeg, audio/wav, audio/*">
             </div>
             <div class="control-group">
                 <label>Volume</label>
@@ -295,65 +304,174 @@
         </div>
     </div>
 
-    <div class="master-controls">
+    <div class="master-controls" id="studioControls">
         <button id="btnStart">1. INIT STUDIO</button>
         <button id="btnRecord" disabled>2. ● RECORD</button>
         <button id="btnStop" disabled>■ STOP</button>
     </div>
     
+    <div id="remoteModeUI">
+        <h2>REMOTE MIC MODE</h2>
+        <p>スタジオ側の「別デバイスをマイクとして使う」を押し、<br>以下のPINを入力してください</p>
+        <div class="pin-display" id="pinDisplay">----</div>
+        <div id="remoteSysMsg" style="color:var(--text-sub);">待機中...</div>
+    </div>
+
     <div id="sysMessage"></div>
     <div id="downloadLinks" class="downloads"></div>
 
 <script>
-    // Audio Context & Nodes
-    let audioCtx;
-    let mixedDest;
-    let recorders = {};
-    let recordedChunks = {};
+    // --- Audio System Variables ---
+    let audioCtx, mixedDest;
+    let recorders = {}, recordedChunks = {};
     let streamMic1, streamMic2;
-    
     let gainMic1, gainMic2, gainBgm;
     let analyserMic1, analyserMic2, analyserBgm;
+    let startTime, timerInterval;
 
-    // Timer variables
-    let startTime;
-    let timerInterval;
+    // --- P2P Variables ---
+    let peer; 
+    let isRemoteMode = false;
 
-    // Elements
-    const mic1Select = document.getElementById('mic1Select');
-    const mic2Select = document.getElementById('mic2Select');
-    const bgmSelect = document.getElementById('bgmSelect');
-    const bgmAudio = document.getElementById('bgmAudio');
-    const bgmUpload = document.getElementById('bgmUpload');
-    const timerDisplay = document.getElementById('timerDisplay');
+    // --- Elements ---
     const sysMsg = document.getElementById('sysMessage');
-    
-    // IndexedDB for multiple BGM
+    const showMsg = (msg) => { sysMsg.innerText = msg; console.log(msg); };
+
+    // --- Mode Switching ---
+    function toggleMode() {
+        isRemoteMode = !isRemoteMode;
+        if(isRemoteMode) {
+            document.getElementById('studioUI').style.display = 'none';
+            document.getElementById('studioControls').style.display = 'none';
+            document.getElementById('studioStatus').style.display = 'none';
+            document.getElementById('remoteModeUI').style.display = 'flex';
+            document.getElementById('modeBtn').innerText = "🎛 スタジオに戻る";
+            initRemoteMic();
+        } else {
+            document.getElementById('studioUI').style.display = 'grid';
+            document.getElementById('studioControls').style.display = 'flex';
+            document.getElementById('studioStatus').style.display = 'flex';
+            document.getElementById('remoteModeUI').style.display = 'none';
+            document.getElementById('modeBtn').innerText = "📱 リモートマイクにする";
+            if(peer) { peer.destroy(); peer = null; }
+        }
+    }
+
+    // ==========================================
+    // P2P: REMOTE MIC MODE (Client)
+    // ==========================================
+    function initRemoteMic() {
+        const pin = Math.floor(1000 + Math.random() * 9000).toString();
+        document.getElementById('pinDisplay').innerText = pin;
+        document.getElementById('remoteSysMsg').innerText = "通信サーバーに接続中...";
+
+        peer = new Peer('radio-mic-' + pin);
+
+        peer.on('open', id => {
+            document.getElementById('remoteSysMsg').innerText = "PIN待機中... スタジオから接続してください。";
+        });
+
+        // スタジオ側からのハンドシェイク（データ通信）を受信
+        peer.on('connection', conn => {
+            conn.on('data', async (data) => {
+                if(data.action === 'handshake') {
+                    document.getElementById('remoteSysMsg').innerText = "スタジオからの要求を確認。マイクを接続中...";
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                        // こちらからスタジオに向けて音声ストリームを発信
+                        peer.call(data.hostId, stream);
+                        document.getElementById('remoteSysMsg').innerText = "🔴 スタジオに音声を送信中！";
+                        document.getElementById('remoteSysMsg').style.color = var(--danger);
+                    } catch(err) {
+                        alert("マイクの許可が得られませんでした。");
+                        document.getElementById('remoteSysMsg').innerText = "マイクエラー";
+                    }
+                }
+            });
+        });
+    }
+
+    // ==========================================
+    // P2P: STUDIO MODE (Host)
+    // ==========================================
+    function initHostPeer(onReady) {
+        if(!peer || peer.disconnected) {
+            peer = new Peer();
+            peer.on('open', onReady);
+            
+            // リモートからの音声ストリーム着信を処理
+            peer.on('call', call => {
+                call.answer(); // 受信するだけなので引数なしで応答
+                call.on('stream', remoteStream => {
+                    showMsg("✅ リモートマイクの接続に成功しました！");
+                    
+                    // Mic 2をリモートストリームで上書き
+                    if (streamMic2) streamMic2.getTracks().forEach(t => t.stop());
+                    streamMic2 = remoteStream;
+                    
+                    const source2 = audioCtx.createMediaStreamSource(streamMic2);
+                    // 以前の接続をリセットして新しく繋ぐ
+                    gainMic2.disconnect();
+                    gainMic2 = audioCtx.createGain();
+                    gainMic2.connect(analyserMic2);
+                    source2.connect(gainMic2);
+                    
+                    setupRecorder('mic2', streamMic2);
+                    updateVolumes();
+                    
+                    // UI更新
+                    const select = document.getElementById('mic2Select');
+                    select.innerHTML = '<option value="remote">📱 Remote Device connected</option>';
+                });
+            });
+        } else {
+            onReady();
+        }
+    }
+
+    function connectRemoteMic() {
+        if(!audioCtx) return alert("先に「1. INIT STUDIO」を押してシステムを起動してください。");
+        
+        const pin = prompt("別デバイスに表示されている4桁のPINを入力してください:");
+        if(!pin || pin.length !== 4) return;
+
+        showMsg("リモートデバイスに接続中...");
+
+        initHostPeer(() => {
+            // ハンドシェイク送信: リモートデバイスに「自分のID」を教えてコールさせる
+            const conn = peer.connect('radio-mic-' + pin);
+            conn.on('open', () => {
+                conn.send({ action: 'handshake', hostId: peer.id });
+                showMsg("ハンドシェイク完了。リモートからの音声着信を待機中...");
+            });
+            conn.on('error', err => {
+                showMsg("接続エラー: PINが間違っているか、デバイスが見つかりません。");
+            });
+        });
+    }
+
+
+    // ==========================================
+    // STUDIO AUDIO LOGIC
+    // ==========================================
     const dbName = "RadioStudioDB_v2";
     let db;
     const request = indexedDB.open(dbName, 1);
-    
-    request.onupgradeneeded = (e) => {
+    request.onupgradeneeded = e => {
         db = e.target.result;
         db.createObjectStore("bgmFiles", { keyPath: "id", autoIncrement: true });
     };
-    
-    request.onsuccess = (e) => {
-        db = e.target.result;
-        updateBgmList();
-    };
+    request.onsuccess = e => { db = e.target.result; updateBgmList(); };
 
-    // System Message Helper
-    const showMsg = (msg) => { sysMsg.innerText = msg; console.log(msg); };
-
-    // Get Mic Devices
     async function getDevices() {
+        if(isRemoteMode) return;
         try {
             await navigator.mediaDevices.getUserMedia({ audio: true });
             const devices = await navigator.mediaDevices.enumerateDevices();
             const audioInputs = devices.filter(d => d.kind === 'audioinput');
             
-            [mic1Select, mic2Select].forEach(select => {
+            [document.getElementById('mic1Select'), document.getElementById('mic2Select')].forEach(select => {
+                const currentVal = select.value;
                 select.innerHTML = '<option value="">None</option>';
                 audioInputs.forEach(device => {
                     const option = document.createElement('option');
@@ -361,13 +479,13 @@
                     option.text = device.label || `Mic ${select.options.length}`;
                     select.appendChild(option);
                 });
+                if(currentVal && currentVal !== 'remote') select.value = currentVal;
             });
         } catch (err) {
-            alert("マイクへのアクセスを許可してください。");
+            console.log("Mic access denied on load.");
         }
     }
 
-    // Init Audio Context
     async function initAudio() {
         if(!audioCtx) {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -381,40 +499,34 @@
             analyserMic2 = audioCtx.createAnalyser();
             analyserBgm = audioCtx.createAnalyser();
 
-            // Routing: Source -> Gain -> Analyser -> Dest
-            // これにより、Gain（音量）の変更が波形（Analyser）に反映されます
-            gainMic1.connect(analyserMic1);
-            analyserMic1.connect(mixedDest);
-
-            gainMic2.connect(analyserMic2);
-            analyserMic2.connect(mixedDest);
-
-            gainBgm.connect(analyserBgm);
+            gainMic1.connect(analyserMic1); analyserMic1.connect(mixedDest);
+            gainMic2.connect(analyserMic2); analyserMic2.connect(mixedDest);
+            gainBgm.connect(analyserBgm); 
             analyserBgm.connect(mixedDest);
-            analyserBgm.connect(audioCtx.destination); // モニター用
+            analyserBgm.connect(audioCtx.destination); 
 
-            const bgmSource = audioCtx.createMediaElementSource(bgmAudio);
+            const bgmSource = audioCtx.createMediaElementSource(document.getElementById('bgmAudio'));
             bgmSource.connect(gainBgm);
 
             loadVolumes();
-            
             drawWaveform('canvasMic1', analyserMic1);
             drawWaveform('canvasMic2', analyserMic2);
             drawWaveform('canvasBgm', analyserBgm, '#ff00ff');
         }
 
-        // Connect Mics
-        if (mic1Select.value) {
+        const mic1Select = document.getElementById('mic1Select').value;
+        if (mic1Select) {
             if (streamMic1) streamMic1.getTracks().forEach(t => t.stop());
-            streamMic1 = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: mic1Select.value } } });
+            streamMic1 = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: mic1Select } } });
             const source1 = audioCtx.createMediaStreamSource(streamMic1);
             source1.connect(gainMic1);
             setupRecorder('mic1', streamMic1);
         }
 
-        if (mic2Select.value && mic2Select.value !== mic1Select.value) {
+        const mic2Select = document.getElementById('mic2Select').value;
+        if (mic2Select && mic2Select !== 'remote' && mic2Select !== mic1Select) {
             if (streamMic2) streamMic2.getTracks().forEach(t => t.stop());
-            streamMic2 = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: mic2Select.value } } });
+            streamMic2 = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: mic2Select } } });
             const source2 = audioCtx.createMediaStreamSource(streamMic2);
             source2.connect(gainMic2);
             setupRecorder('mic2', streamMic2);
@@ -427,91 +539,58 @@
         showMsg("Studio initialized. Ready to record.");
     }
 
-    // Timer Logic
     function startTimer() {
         startTime = Date.now();
-        timerDisplay.innerText = "00:00";
+        document.getElementById('timerDisplay').innerText = "00:00";
         timerInterval = setInterval(() => {
             const diff = Date.now() - startTime;
             const m = Math.floor(diff / 60000).toString().padStart(2, '0');
             const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
-            timerDisplay.innerText = `${m}:${s}`;
+            document.getElementById('timerDisplay').innerText = `${m}:${s}`;
         }, 1000);
     }
-    
-    function stopTimer() {
-        clearInterval(timerInterval);
-    }
 
-    // Recorder Setup
     function setupRecorder(id, stream) {
         recordedChunks[id] = [];
         recorders[id] = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-        recorders[id].ondataavailable = e => {
-            if (e.data.size > 0) recordedChunks[id].push(e.data);
-        };
+        recorders[id].ondataavailable = e => { if (e.data.size > 0) recordedChunks[id].push(e.data); };
         recorders[id].onstop = async () => {
             const webmBlob = new Blob(recordedChunks[id], { type: 'audio/webm' });
             showMsg(`Converting ${id} to MP3... Please wait.`);
-            
             try {
-                // WebM Blob を MP3 Blob に変換
                 const mp3Blob = await convertToMp3(webmBlob);
                 createDownloadLink(mp3Blob, `Radio_${id}_${new Date().getTime()}.mp3`);
                 showMsg(`Conversion complete for ${id}.`);
             } catch(e) {
-                console.error("MP3 Encode Error:", e);
-                showMsg(`MP3 conversion failed for ${id}. Providing WebM format instead.`);
-                // 失敗した場合は元の形式で書き出し
+                console.error(e);
                 createDownloadLink(webmBlob, `Radio_${id}_fallback.webm`);
             }
         };
     }
 
-    // MP3 Encoding via lamejs and Web Audio API
     async function convertToMp3(blob) {
-        // Blob から ArrayBuffer を取得し、AudioContextでPCMデータにデコード
         const arrayBuffer = await blob.arrayBuffer();
         const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-        
         const channels = audioBuffer.numberOfChannels;
-        const sampleRate = audioBuffer.sampleRate;
-        const kbps = 128;
-        
-        // lamejs の初期化
-        const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
+        const mp3encoder = new lamejs.Mp3Encoder(channels, audioBuffer.sampleRate, 128);
         const mp3Data = [];
-        
         const left = audioBuffer.getChannelData(0);
         const right = channels > 1 ? audioBuffer.getChannelData(1) : left;
         
-        const sampleBlockSize = 1152; // MP3フレームサイズ
-        
-        for (let i = 0; i < left.length; i += sampleBlockSize) {
-            const leftChunk = left.subarray(i, i + sampleBlockSize);
-            const rightChunk = right.subarray(i, i + sampleBlockSize);
-            
-            // Float32 (-1.0 to 1.0) を Int16 (-32768 to 32767) に変換
+        for (let i = 0; i < left.length; i += 1152) {
+            const leftChunk = left.subarray(i, i + 1152);
+            const rightChunk = right.subarray(i, i + 1152);
             const leftInt16 = new Int16Array(leftChunk.length);
             const rightInt16 = new Int16Array(rightChunk.length);
-            
             for (let j = 0; j < leftChunk.length; j++) {
                 leftInt16[j] = leftChunk[j] < 0 ? leftChunk[j] * 32768 : leftChunk[j] * 32767;
                 rightInt16[j] = rightChunk[j] < 0 ? rightChunk[j] * 32768 : rightChunk[j] * 32767;
             }
-            
-            // エンコード
-            const mp3buf = channels === 2 ? 
-                mp3encoder.encodeBuffer(leftInt16, rightInt16) :
-                mp3encoder.encodeBuffer(leftInt16);
-                
+            const mp3buf = channels === 2 ? mp3encoder.encodeBuffer(leftInt16, rightInt16) : mp3encoder.encodeBuffer(leftInt16);
             if (mp3buf.length > 0) mp3Data.push(mp3buf);
         }
-        
-        // 最終フレームのフラッシュ
         const mp3buf = mp3encoder.flush();
         if (mp3buf.length > 0) mp3Data.push(mp3buf);
-        
         return new Blob(mp3Data, { type: 'audio/mp3' });
     }
 
@@ -519,18 +598,15 @@
         const url = URL.createObjectURL(blob);
         const div = document.createElement('div');
         div.className = 'download-item';
-        div.innerHTML = `
-            <span>💽 ${filename}</span>
-            <a href="${url}" download="${filename}">DOWNLOAD</a>
-        `;
+        div.innerHTML = `<span>💽 ${filename}</span><a href="${url}" download="${filename}">DOWNLOAD</a>`;
         document.getElementById('downloadLinks').appendChild(div);
     }
 
-    // Volumes
     function loadVolumes() {
-        document.getElementById('mic1Vol').value = localStorage.getItem('mic1Vol') || 1;
-        document.getElementById('mic2Vol').value = localStorage.getItem('mic2Vol') || 1;
-        document.getElementById('bgmVol').value = localStorage.getItem('bgmVol') || 0.3;
+        ['mic1Vol', 'mic2Vol', 'bgmVol'].forEach(id => {
+            const saved = localStorage.getItem(id);
+            if(saved) document.getElementById(id).value = saved;
+        });
         updateVolumes();
     }
 
@@ -538,30 +614,24 @@
         if(gainMic1) gainMic1.gain.value = document.getElementById('mic1Vol').value;
         if(gainMic2) gainMic2.gain.value = document.getElementById('mic2Vol').value;
         if(gainBgm) gainBgm.gain.value = document.getElementById('bgmVol').value;
-
-        localStorage.setItem('mic1Vol', document.getElementById('mic1Vol').value);
-        localStorage.setItem('mic2Vol', document.getElementById('mic2Vol').value);
-        localStorage.setItem('bgmVol', document.getElementById('bgmVol').value);
+        ['mic1Vol', 'mic2Vol', 'bgmVol'].forEach(id => {
+            localStorage.setItem(id, document.getElementById(id).value);
+        });
     }
 
-    ['mic1Vol', 'mic2Vol', 'bgmVol'].forEach(id => {
-        document.getElementById(id).addEventListener('input', updateVolumes);
-    });
+    ['mic1Vol', 'mic2Vol', 'bgmVol'].forEach(id => document.getElementById(id).addEventListener('input', updateVolumes));
 
-    // BGM Upload & IndexedDB Handling
-    bgmUpload.addEventListener('change', (e) => {
+    document.getElementById('bgmUpload').addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
             const reader = new FileReader();
             reader.onload = (event) => {
-                const blob = new Blob([event.target.result], { type: file.type });
                 const tx = db.transaction("bgmFiles", "readwrite");
-                tx.objectStore("bgmFiles").add({ name: file.name, blob: blob });
-                
+                tx.objectStore("bgmFiles").add({ name: file.name, blob: new Blob([event.target.result], { type: file.type }) });
                 tx.oncomplete = () => {
                     updateBgmList();
-                    bgmUpload.value = ""; // reset
-                    showMsg(`${file.name} saved to storage.`);
+                    e.target.value = ""; 
+                    showMsg(`${file.name} saved.`);
                 };
             };
             reader.readAsArrayBuffer(file);
@@ -571,58 +641,46 @@
     function updateBgmList() {
         const tx = db.transaction("bgmFiles", "readonly");
         const req = tx.objectStore("bgmFiles").getAll();
-        
         req.onsuccess = (e) => {
-            const files = e.target.result;
-            // リストをリセット
-            bgmSelect.innerHTML = '<option value="">No Track</option>';
-            files.forEach(f => {
+            const select = document.getElementById('bgmSelect');
+            select.innerHTML = '<option value="">No Track</option>';
+            e.target.result.forEach(f => {
                 const opt = document.createElement('option');
-                opt.value = f.id;
-                opt.text = f.name;
-                bgmSelect.appendChild(opt);
+                opt.value = f.id; opt.text = f.name;
+                select.appendChild(opt);
             });
-            
-            // 前回選択したものを復元
-            const lastBgm = localStorage.getItem('lastBgmId');
-            if (lastBgm && files.find(f => f.id == lastBgm)) {
-                bgmSelect.value = lastBgm;
+            const last = localStorage.getItem('lastBgmId');
+            if (last && e.target.result.find(f => f.id == last)) {
+                select.value = last;
                 playSelectedBgm();
             }
         };
     }
 
-    bgmSelect.addEventListener('change', () => {
-        localStorage.setItem('lastBgmId', bgmSelect.value);
+    document.getElementById('bgmSelect').addEventListener('change', () => {
+        localStorage.setItem('lastBgmId', document.getElementById('bgmSelect').value);
         playSelectedBgm();
     });
 
     function playSelectedBgm() {
-        const id = parseInt(bgmSelect.value);
-        if (!id) {
-            bgmAudio.src = "";
-            return;
-        }
+        const id = parseInt(document.getElementById('bgmSelect').value);
+        const audio = document.getElementById('bgmAudio');
+        if (!id) return audio.src = "";
         
-        const tx = db.transaction("bgmFiles", "readonly");
-        const req = tx.objectStore("bgmFiles").get(id);
+        const req = db.transaction("bgmFiles", "readonly").objectStore("bgmFiles").get(id);
         req.onsuccess = (e) => {
             if (e.target.result) {
-                bgmAudio.src = URL.createObjectURL(e.target.result.blob);
-                // 録音中でなければ一時停止状態にしておく
-                if(document.getElementById('btnRecord').disabled === false) {
-                    bgmAudio.pause();
-                }
+                audio.src = URL.createObjectURL(e.target.result.blob);
+                if(document.getElementById('btnRecord').disabled === false) audio.pause();
             }
         };
     }
 
-    // Recording Controls
     document.getElementById('btnStart').addEventListener('click', initAudio);
     
     document.getElementById('btnRecord').addEventListener('click', () => {
         if(audioCtx.state === 'suspended') audioCtx.resume();
-        if(bgmSelect.value) bgmAudio.play();
+        if(document.getElementById('bgmSelect').value) document.getElementById('bgmAudio').play();
         
         Object.values(recorders).forEach(r => r.start());
         document.getElementById('btnRecord').disabled = true;
@@ -635,47 +693,37 @@
     });
 
     document.getElementById('btnStop').addEventListener('click', () => {
-        bgmAudio.pause();
-        bgmAudio.currentTime = 0; // 巻き戻し
+        const audio = document.getElementById('bgmAudio');
+        audio.pause();
+        audio.currentTime = 0; 
         
-        Object.values(recorders).forEach(r => {
-            if(r.state !== 'inactive') r.stop();
-        });
+        Object.values(recorders).forEach(r => { if(r.state !== 'inactive') r.stop(); });
         
         document.getElementById('btnRecord').disabled = false;
         document.getElementById('btnStop').disabled = true;
         document.getElementById('recordingStatus').style.display = 'none';
         
-        stopTimer();
+        clearInterval(timerInterval);
     });
 
-    // Waveform Visualization
     function drawWaveform(canvasId, analyser, color = '#00e6b8') {
         const canvas = document.getElementById(canvasId);
         const ctx = canvas.getContext('2d');
         analyser.fftSize = 2048;
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
         function draw() {
             requestAnimationFrame(draw);
             analyser.getByteTimeDomainData(dataArray);
-
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.lineWidth = 2;
             ctx.strokeStyle = color;
             ctx.beginPath();
-
-            const sliceWidth = canvas.width * 1.0 / bufferLength;
+            const sliceWidth = canvas.width * 1.0 / analyser.frequencyBinCount;
             let x = 0;
-
-            for (let i = 0; i < bufferLength; i++) {
-                const v = dataArray[i] / 128.0;
-                const y = v * canvas.height / 2;
-
-                if (i === 0) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
-
+            for (let i = 0; i < analyser.frequencyBinCount; i++) {
+                const y = (dataArray[i] / 128.0) * canvas.height / 2;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
                 x += sliceWidth;
             }
             ctx.lineTo(canvas.width, canvas.height / 2);
@@ -684,7 +732,6 @@
         draw();
     }
 
-    // App Init
     getDevices();
     navigator.mediaDevices.addEventListener('devicechange', getDevices);
 </script>
